@@ -56,6 +56,14 @@ git clone git@github.com:jbollineni/f5-bigip-upgrade-ansible.git
 cd f5-bigip-upgrade-ansible
 ```
 
+- Create and activate python virtual environment
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
 - Add upgrade pair FQDNs to `hosts.yml` file.
 
 - Create group_vars file corresponding to the hosts in hosts.yml
