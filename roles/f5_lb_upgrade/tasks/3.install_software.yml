@@ -1,0 +1,39 @@
+---
+# code: language=ansible
+
+- name: About to install software image BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }} into target volume {{ target_install_volume }}
+  debug:
+    msg:
+      - "The following task will be skipped if software is already installed."
+      - "If not, it will take around 15 minutes to install. Please wait..."
+
+- name: Installing new software image BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }} into target volume {{ target_install_volume }} on vCMP guest LBs
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_software_install:
+    provider: "{{ provider }}"
+    block_device_image: "BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }}.iso"
+    volume: "{{ target_install_volume }}"
+    state: installed
+    type: vcmp
+  register: result
+  when: "platform_type == 'vcmp'"
+
+- name: Installing new software image BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }} into target volume {{ target_install_volume }} on non-vCMP guest LBs
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_software_install:
+    provider: "{{ provider }}"
+    image: "BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }}.iso"
+    volume: "{{ target_install_volume }}"
+    state: installed
+    type: standard
+  register: result
+  when: "platform_type != 'vcmp'"
+
+- name: BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }} software image installation status
+  debug:
+    msg:
+      - "{{ result }}"
+      # - "{{ desired_image_name 'already installed in' {{ target_install_volume }} if result.changed == False else 'completed' }}"
+      # - "BIGIP-{{upgrade_software_version}}-{{upgrade_software_build}} 'already installed in' {{target_install_volume}} {{if result.changed == False else 'completed' }}"
+
+

@@ -1,0 +1,50 @@
+---
+# code: language=ansible
+
+- name: Disable auto sync on sync failover device group
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_group:
+    provider: "{{ provider }}"
+    name: "{{ sync_failover_group_name }}"
+    auto_sync: false
+
+- name: Disable HA Group prior to upgrade
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_ha_group:
+    provider: "{{ provider }}"
+    name: "{{ ha_group_name }}"
+    enable: false
+
+# - name: SNMP changes to address control plane CPU usage
+#   block:
+#     - name: Get SNMP allowed client list
+#       uri:
+#         url: "https://{{ inventory_hostname }}/mgmt/tm/sys/snmp"
+#         validate_certs: false
+#         method: GET
+#         headers:
+#           X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+#       register: result
+
+#     - name: Set SNMP  allowed client list fact
+#       set_fact:
+#         snmp_list: "{{ result.json.allowedAddresses }}"
+#       no_log: true
+
+#     - name: Disable External SNMP polling to address control plane usage on the device
+#       delegate_to: localhost
+#       f5networks.f5_modules.bigip_snmp:
+#         provider: "{{ provider }}"
+#         allowed_addresses: default
+#   rescue:
+#     - name: Error getting SNMP allowed addresses list. Set snnp_list to default.
+#       set_fact:
+#         snmp_list: 'default'
+
+- name: Save sys config
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_config:
+    provider: "{{ provider }}"
+    save: true
+
+

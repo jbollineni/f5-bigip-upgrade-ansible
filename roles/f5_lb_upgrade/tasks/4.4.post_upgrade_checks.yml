@@ -1,0 +1,79 @@
+---
+# code: language=ansible
+
+# Check if the units are in active and standby modes and also object counts
+
+
+# SLB Object Counts
+- name: Get SLB all Virtual Servers' Stats post upgrade
+  uri:
+    url: "https://{{ inventory_hostname }}/mgmt/tm/ltm/virtual/stats?$select=status.availabilityState,status.enabledState,clientside.curConns,clientside.totConns,destination"
+    # url: "https://{{ inventory_hostname }}/mgmt/tm/ltm/virtual/stats?$top=5&$select=status.availabilityState,status.enabledState,clientside.curConns,clientside.totConns,destination"
+    validate_certs: false
+    method: GET
+    headers:
+      X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+  register: result
+
+- name: Set Virtual Servers' status and state to a dict post upgrade
+  vars:
+    vs_dict_post_upgrade:
+  set_fact:
+    # The vs_dict is set as a single fact instead of breaking into multiple facts and referencing them,
+    # because the facts will have to be set under different tasks with each task having it's own loop, making it more complex
+    vs_dict_post_upgrade: "{{ vs_dict_post_upgrade | combine({item.key | regex_replace('https://localhost/mgmt/tm/ltm/virtual/', '') | regex_replace('/stats', ''): {'monitor_status': item.value['nestedStats']['entries']['status.availabilityState']['description'], 'admin_state': item.value['nestedStats']['entries']['status.enabledState']['description']}}) }}"
+  with_dict: "{{ result.json.entries }}"
+  no_log: true
+
+- name: Set vs object status and state counts to dicts post upgrade
+  set_fact:
+    status_dict_post_upgrade: "{{ vs_dict_post_upgrade | json_query('*.monitor_status') | community.general.counter }}"
+    state_dict_post_upgrade: "{{ vs_dict_post_upgrade | json_query('*.admin_state') | community.general.counter }}"
+  no_log: true
+
+- name: Set Unit 'a' vs states and status post upgrade
+  delegate_to: localhost
+  delegate_facts: true
+  set_fact:
+    localhost_unit_a: "{{ hostvars['localhost']['localhost_unit_a'] | combine({'vs_post_upgrade_total': vs_dict | length, 'vs_post_upgrade_enabled': state_dict['enabled'] | default(0), 'vs_post_upgrade_disabled': state_dict['disabled'] | default(0), 'vs_post_upgrade_offline': status_dict['offline'] | default(0), 'vs_post_upgrade_available': status_dict['available'] | default(0), 'vs_post_upgrade_unknown': status_dict['unknown'] | default(0)}) }}"
+  when: "unit_a.name == inventory_hostname"
+  no_log: true
+
+- name: Set Unit 'b' vs states and status post upgrade
+  delegate_to: localhost
+  delegate_facts: true
+  set_fact:
+    localhost_unit_b: "{{ hostvars['localhost']['localhost_unit_b'] | combine({'vs_post_upgrade_total': vs_dict | length, 'vs_post_upgrade_enabled': state_dict['enabled'] | default(0), 'vs_post_upgrade_disabled': state_dict['disabled'] | default(0), 'vs_post_upgrade_offline': status_dict['offline'] | default(0), 'vs_post_upgrade_available': status_dict['available'] | default(0), 'vs_post_upgrade_unknown': status_dict['unknown'] | default(0)}) }}"
+  when: "unit_b.name == inventory_hostname"
+  no_log: true
+
+- name: Print VS Object state and status counts post upgrade
+  run_once: true
+  debug:
+    msg:
+      - "{{ '*' * 55 }}"
+      - ".....................: {{ '% 7s% 7s% 7s% 7s' | format('Unit A', '|', 'Unit B', ' ') }}"
+      - "vs original total    : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_total'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_total'], ' ') }}"
+      - "vs original enabled  : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_enabled'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_enabled'], ' ') }}"
+      - "vs original disabled : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_disabled'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_disabled'], ' ') }}"
+      - "vs original available: {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_available'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_available'], ' ') }}"
+      - "vs original offline  : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_offline'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_offline'], ' ') }}"
+      - "vs original unknown  : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_unknown'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_unknown'], ' ') }}"
+      - "{{ '*' * 55 }}"
+      - "vs post upgrade total    : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_post_upgrade_total'], '|', hostvars['localhost']['localhost_unit_b']['vs_post_upgrade_total'], ' ') }}"
+      - "vs post upgrade enabled  : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_post_upgrade_enabled'], '|', hostvars['localhost']['localhost_unit_b']['vs_post_upgrade_enabled'], ' ') }}"
+      - "vs post upgrade disabled : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_post_upgrade_disabled'], '|', hostvars['localhost']['localhost_unit_b']['vs_post_upgrade_disabled'], ' ') }}"
+      - "vs post upgrade available: {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_post_upgrade_available'], '|', hostvars['localhost']['localhost_unit_b']['vs_post_upgrade_available'], ' ') }}"
+      - "vs post upgrade offline  : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_post_upgrade_offline'], '|', hostvars['localhost']['localhost_unit_b']['vs_post_upgrade_offline'], ' ') }}"
+      - "vs post upgrade unknown  : {{ '% 7s% 7s% 7s% 7s' | format(hostvars['localhost']['localhost_unit_a']['vs_post_upgrade_unknown'], '|', hostvars['localhost']['localhost_unit_b']['vs_post_upgrade_unknown'], ' ') }}"
+      - "{{ '*' * 55 }}"
+
+- name: Check if VS object counts differ
+  fail:
+    msg:
+      - Virtual Servers count not the same. Aborting.
+  failed_when: hostvars['localhost']['localhost_unit_a']['vs_original_total'] != hostvars['localhost']['localhost_unit_b']['vs_post_upgrade_total'] or
+    hostvars['localhost']['localhost_unit_b']['vs_original_total'] != hostvars['localhost']['localhost_unit_a']['vs_post_upgrade_total']
+
+
+#check bgp routing

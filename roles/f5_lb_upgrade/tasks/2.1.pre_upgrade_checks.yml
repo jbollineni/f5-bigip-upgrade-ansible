@@ -1,0 +1,315 @@
+---
+# code: language=ansible
+
+# Placeholder fact dicts to add device facts to localhost under future tasks
+# These facts will be used for comparisons between the two LB units
+- name: Set empty localhost unit facts
+  delegate_to: localhost
+  delegate_facts: true
+  set_fact:
+    localhost_unit_a:
+    localhost_unit_b:
+  no_log: true
+
+- name: Software version and volume check block
+  block:
+    - name: Current Software version check
+      fail:
+        msg:
+          - "Device is already at BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }} target version. Aborting."
+      failed_when: "device_os_version == 'BIGIP-' ~ upgrade_software_version ~ '-' ~ upgrade_software_build"
+
+    - name: Check target install volume status
+      uri:
+        url: "https://{{ inventory_hostname }}/mgmt/tm/sys/software/volume"
+        validate_certs: false
+        method: GET
+        headers:
+          X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+      register: result
+
+    - name: Set original active software volume fact
+      set_fact:
+        original_active_volume: "{{ item.name | split('/') | first }}"
+      with_items: "{{ result.json['items'] }}"
+      no_log: true
+      when: "'active' in item"
+
+    - name: "Check and abort if target install volume {{ target_install_volume }} is active"
+      fail:
+        msg:
+          - "Target install volume {{ target_install_volume }} is currently active."
+          - "Cannot install new image while volume is active."
+          - "Aborting task execution."
+      when: target_install_volume == original_active_volume
+
+# Failover state check
+- name: Failover state check block
+  block:
+    - name: Get Devices' current failover state
+      delegate_to: localhost
+      f5networks.f5_modules.bigip_device_info:
+        provider: "{{ provider }}"
+        gather_subset:
+          - "devices"
+      register: result
+
+    - name: Set Original Failover state fact
+      set_fact:
+        ha_original_state: "{{ item_failover_unit['failover_state'] }}"
+
+      with_items: "{{ result['devices'] }}"
+      loop_control:
+        loop_var: item_failover_unit
+      when: "item_failover_unit['name'] == inventory_hostname"
+      no_log: true
+
+    - name: Print devices HA state
+      debug:
+        msg:
+          - "HA Original State: {{ ha_original_state }}"
+
+    - name: Set Unit 'a' Original Failover state fact on localhost
+      delegate_to: localhost
+      delegate_facts: true
+      set_fact:
+        localhost_unit_a: "{{ hostvars['localhost']['localhost_unit_a'] | combine({'ha_original_state': item_failover_unit['failover_state']}) }}"
+      with_items: "{{ result['devices'] }}"
+      loop_control:
+        loop_var: item_failover_unit
+      when: "item_failover_unit['name'] == inventory_hostname and unit_a.name == inventory_hostname"
+      no_log: true
+
+    - name: Set Unit 'b' Original Failover state fact on localhost
+      delegate_to: localhost
+      delegate_facts: true
+      set_fact:
+        localhost_unit_b: "{{ hostvars['localhost']['localhost_unit_b'] | combine({'ha_original_state': item_failover_unit['failover_state']}) }}"
+      with_items: "{{ result['devices'] }}"
+      loop_control:
+        loop_var: item_failover_unit
+      when: "item_failover_unit['name'] == inventory_hostname and unit_b.name == inventory_hostname"
+      no_log: true
+
+    - name: Compare Original Failover states of devices
+      fail:
+        msg:
+          - Devices in HA are not in Active / Standby states. Aborting.
+          - Ensure if the devices are in Active/Standby states before running the playbook.
+      failed_when: "not ((hostvars['localhost']['localhost_unit_a']['ha_original_state'] == 'standby' and hostvars['localhost']['localhost_unit_b']['ha_original_state'] == 'active') or (hostvars['localhost']['localhost_unit_a']['ha_original_state'] == 'active' and hostvars['localhost']['localhost_unit_b']['ha_original_state'] == 'standby'))"
+      when: "ha_type == 'ha'"
+
+# Sync check
+- name: Device Sync check
+  block:
+    - name: Get HA pair sync status
+      delegate_to: localhost
+      f5networks.f5_modules.bigip_device_info:
+        provider: "{{ provider }}"
+        gather_subset:
+          - "sync-status"
+      register: result
+
+    - name: Check and abort play if devices are not in sync
+      fail:
+        msg:
+          - Devices are not in sync. Aborting.
+          - Ensure devices are in sync before running the playbook.
+      failed_when: result['sync_status'][0]['status'] != 'In Sync'
+
+# Software Image checks
+- name: Software Image checks
+  block:
+    - name: Check if platform type is vcmp
+      debug:
+        msg: "Got platform type as {{ platform_type }}. Will check for block software images."
+      when: platform_type == "vcmp"
+
+    - name: Check if platform type is not vcmp
+      debug:
+        msg: "Got platform type as {{ platform_type }}. Will check for software images."
+      when: platform_type != "vcmp"
+
+    - name: Get list of device images (block device image) for 'vcmp' platform_type
+      uri:
+        url: "https://{{ inventory_hostname }}/mgmt/tm/sys/software/block-device-image"
+        validate_certs: false
+        method: GET
+        headers:
+          X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+      register: result
+      when: platform_type == "vcmp"
+
+    - name: Get list of device images for 'non-vcmp' platform_type
+      uri:
+        url: "https://{{ inventory_hostname }}/mgmt/tm/sys/software/image"
+        validate_certs: false
+        method: GET
+        headers:
+          X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+      register: result
+      when: platform_type != "vcmp"
+
+    - name: Check if device images exist
+      fail:
+        msg:
+          - No device images exist. Aborting.
+          - Ensure the image is uploaded to device or the underlying Viprion Host in case of vcmp guest.
+      failed_when: result.json['items'] == []
+
+
+    - name: Create list of existing device images
+      set_fact:
+        device_image_list: "{{ device_image_list | default([]) + [item.name | split('/') | first] }}"
+      with_items: "{{ result.json['items'] }}"
+      # when: platform_type == "vcmp"
+      no_log: true
+
+    - name: Set desired device image name fact
+      set_fact:
+        desired_image_name: "BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }}.iso"
+      no_log: true
+
+    - name: Check and abort play if upgrade image {{ desired_image_name }} does not exist
+      fail:
+        msg:
+          - "Block device image {{ desired_image_name }} does not exist. Aborting."
+          - Ensure the image is uploaded to the underlying Viprion Host.
+      when: "desired_image_name not in device_image_list"
+
+## The following Restjavad and restnoded tasks need manual intervention due to the fact that
+## the connection breaks when restjavad and restnoded are restarted. Though transport "cli" 
+## can be used, we are running into bug https://github.com/F5Networks/f5-ansible/issues/2375 in
+## Ansible verions 2.14 and above.
+
+# Restjavad and Restnoded checks
+- name: Restjavad and Restnoded checks
+  vars:
+    db_timeout:
+  block:
+    - name: Get sys db values
+      uri:
+        # url: "https://{{ inventory_hostname }}/mgmt/tm/sys/db/?$skip=1620&$top=20&$select=name,value"
+        url: "https://{{ inventory_hostname }}/mgmt/tm/sys/db/?$select=name,value"
+        validate_certs: false
+        method: GET
+        headers:
+          X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+      register: result
+
+    - name: Set restjavad, restnoded sys DB values fact
+      set_fact:
+        db_timeout: "{{ db_timeout | combine({item_db.name: item_db.value}) }}"
+      with_items: "{{ result.json['items'] }}"
+      loop_control:
+        loop_var: item_db
+      when: "item_db.name == 'restjavad.timeout' or item_db.name == 'restnoded.timeout'"
+      no_log: true
+
+    - name: Check and abort if restjavad, restnoded DB timeout values are not set correctly.
+      fail:
+        msg:
+          - restjavad, restnoded timeout values not set correctly. Aborting.
+          - Increase the timeout values to avoid rest api timeouts later.
+      failed_when: "not (db_timeout['restjavad.timeout'] | int >= rest_api_db_timeout and db_timeout['restnoded.timeout'] | int >= rest_api_db_timeout)"
+
+
+# SLB Object Count checks
+- name: SLB Object Count checks
+  block:
+    - name: Get SLB all Virtual Servers' stats
+      uri:
+        url: "https://{{ inventory_hostname }}/mgmt/tm/ltm/virtual/stats?$select=status.availabilityState,status.enabledState,clientside.curConns,clientside.totConns,destination"
+        # url: "https://{{ inventory_hostname }}/mgmt/tm/ltm/virtual/stats?$top=5&$select=status.availabilityState,status.enabledState,clientside.curConns,clientside.totConns,destination"
+        validate_certs: false
+        method: GET
+        headers:
+          X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+      register: result
+
+    - name: Set Virtual Servers' status and state to a dict
+      vars:
+        vs_dict:
+      set_fact:
+        # The vs_dict is set as a single fact instead of breaking into multiple facts and referencing them,
+        # because the facts will have to be set under different tasks with each task having it's own loop, making it more complex
+        vs_dict: "{{ vs_dict | combine({item.key | regex_replace('https://localhost/mgmt/tm/ltm/virtual/', '') | regex_replace('/stats', ''): {'monitor_status': item.value['nestedStats']['entries']['status.availabilityState']['description'], 'admin_state': item.value['nestedStats']['entries']['status.enabledState']['description'], 'destination': item.value['nestedStats']['entries']['destination']['description'], 'current_conn': item.value['nestedStats']['entries']['clientside.curConns']['value'], 'total_conn': item.value['nestedStats']['entries']['clientside.totConns']['value']}}) }}"
+      with_dict: "{{ result.json.entries }}"
+      no_log: true
+
+    - name: Set vs object status and state counts to dicts
+      set_fact:
+        status_dict: "{{ vs_dict | json_query('*.monitor_status') | community.general.counter }}"
+        state_dict: "{{ vs_dict | json_query('*.admin_state') | community.general.counter }}"
+      no_log: true
+
+    - name: Set Unit 'a' vs states and status
+      delegate_to: localhost
+      delegate_facts: true
+      set_fact:
+        localhost_unit_a: "{{ hostvars['localhost']['localhost_unit_a'] | combine({'vs_original_total': vs_dict | length, 'vs_original_enabled': state_dict['enabled'] | default(0), 'vs_original_disabled': state_dict['disabled'] | default(0), 'vs_original_offline': status_dict['offline'] | default(0), 'vs_original_available': status_dict['available'] | default(0), 'vs_original_unknown': status_dict['unknown'] | default(0)}) }}"
+      when: "unit_a.name == inventory_hostname"
+      no_log: true
+
+    - name: Set Unit 'b' vs states and status
+      delegate_to: localhost
+      delegate_facts: true
+      set_fact:
+        localhost_unit_b: "{{ hostvars['localhost']['localhost_unit_b'] | combine({'vs_original_total': vs_dict | length, 'vs_original_enabled': state_dict['enabled'] | default(0), 'vs_original_disabled': state_dict['disabled'] | default(0), 'vs_original_offline': status_dict['offline'] | default(0), 'vs_original_available': status_dict['available'] | default(0), 'vs_original_unknown': status_dict['unknown'] | default(0)}) }}"
+      when: "unit_b.name == inventory_hostname"
+      no_log: true
+
+    - name: Set Virtual Servers' list fact sorted by traffic volume
+      vars:
+        query: "[].{key: key, value: value}"
+      set_fact:
+        vs_list: "{{ vs_dict | dict2items | json_query(query) | sort(attribute='value.current_conn', reverse=true) }}"
+      no_log: true
+
+    - name: Set top 10 Virtual Servers' fact
+      set_fact:
+        vs_list_top10: "{{ vs_list[0:10] }}"
+
+    - name: Print VS Object state and status counts
+      run_once: true
+      debug:
+        msg:
+          - "{{ '*' * 55 }}"
+          - ".....................: {{ '% 7s% 7s% 7s% 7s' | format('Unit A', '|', 'Unit B', ' ') }}"
+          - "vs original total    : {{ '% 7s% 7s% 7s% 5s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_total'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_total'], ' ') }}"
+          - "vs original enabled  : {{ '% 7s% 7s% 7s% 5s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_enabled'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_enabled'], ' ') }}"
+          - "vs original disabled : {{ '% 7s% 7s% 7s% 5s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_disabled'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_disabled'], ' ') }}"
+          - "vs original available: {{ '% 7s% 7s% 7s% 5s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_available'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_available'], ' ') }}"
+          - "vs original offline  : {{ '% 7s% 7s% 7s% 5s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_offline'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_offline'], ' ') }}"
+          - "vs original unknown  : {{ '% 7s% 7s% 7s% 5s' | format(hostvars['localhost']['localhost_unit_a']['vs_original_unknown'], '|', hostvars['localhost']['localhost_unit_b']['vs_original_unknown'], ' ') }}"
+          - "{{ '*' * 55 }}"
+
+    - name: Print 10 VS with highest connections
+      debug:
+        msg: |
+          {{ '*' * 90 }}
+          {{ '%-55s %-20s %-10s' | format(
+            'VS Name',
+            'Current Conn',
+            'Total Conn',
+            ) }}
+          {{ '*' * 90 }}
+          {% for item in vs_list_top10 %}
+          {{ '%-60s %-20s %-10s' | format(
+            item['key'],
+            item['value']['current_conn'],
+            item['value']['total_conn'],
+            ) }}
+          {% endfor %}
+          {{ '*' * 90 }}
+
+- name: Pause for 30 seconds
+  ansible.builtin.pause:
+    seconds: 30
+
+# - name: print hostvars
+#   debug:
+#     msg:
+#       - "{{ hostvars['localhost'] }}"
+
+# https://{{bigip_mgmt}}/mgmt/tm/ltm/virtual/stats/?$select=status.availabilityState,status.enabledState,clientside.curConns,clientside.maxConns,destination

@@ -1,0 +1,36 @@
+---
+# tasks file for f5_lb_upgrade
+# code: language=ansible
+
+- name: F5 Role tasks
+  include_tasks: "{{ item_role_task }}"
+  loop:
+    - 0.set_device_facts.yml
+    - 1.generate_auth_tokens.yml
+    - 2.1.pre_upgrade_checks.yml
+    - 2.2.generate_ucs.yml
+    - 2.3.generate_qkview.yml
+    - 2.4.pre_upgrade_changes.yml
+    - 3.install_software.yml
+    - 4.1.set_offline_mode.yml
+    - 4.2.activate_new_software.yml
+    - 1.generate_auth_tokens.yml
+    - 4.3.release_offline_mode.yml
+    - 4.4.post_upgrade_checks.yml
+    - 5.1.failover.yml
+    - 5.2.post_failover_checks.yml
+    - 6.1.set_offline_mode.yml
+    - 6.2.activate_new_software.yml
+    - 1.generate_auth_tokens.yml
+    - 6.3.release_offline_mode.yml
+    - 6.4.post_upgrade_checks.yml
+    - 7.post_upgrade_changes.yml
+    - 8.summary.yml
+  loop_control:
+    loop_var: item_role_task
+
+
+
+
+
+

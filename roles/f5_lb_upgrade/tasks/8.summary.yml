@@ -1,0 +1,41 @@
+---
+# code: language=ansible
+
+- name: Get devices current HA state
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_info:
+    provider: "{{ provider }}"
+    gather_subset:
+      - "devices"
+  register: result
+
+- name: Set final HA state fact
+  set_fact:
+    ha_final_state: "{{ item_failover_unit['failover_state'] }}"
+  with_items: "{{ result['devices'] }}"
+  when: "item_failover_unit['name'] == inventory_hostname"
+  loop_control:
+    loop_var: item_failover_unit
+  no_log: true
+
+- name: Get system version
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_command:
+    provider: "{{ provider }}"
+    commands:
+      - show /sys version | grep  -e Version -e Build
+  register: system_version
+
+- name: Set device version fact
+  set_fact:
+    device_os_version: "BIGIP-{{ system_version.stdout_lines[0] | join(',') | split() | join() | split('Sys::Version,Version') | last | replace('Build', '') | replace(',', '-') }}"
+  no_log: true
+
+- name: Summary
+  debug:
+    msg:
+      - "HA Original State: {{ ha_original_state }}"
+      - "HA Final State: {{ ha_final_state }}"
+      - "Software Version: {{ device_os_version }}"
+
+

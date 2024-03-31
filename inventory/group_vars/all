@@ -1,0 +1,5 @@
+---
+f5_admin_user: "admin"
+f5_admin_password: ""
+f5_root_user: "root"
+f5_root_password: ""

@@ -1,0 +1,85 @@
+---
+# code: language=ansible
+
+- name: Copy configs block
+  when: "ha_post_failover_state != 'active'"
+  block:
+    - name: Cpcfg command notification
+      debug:
+        msg:
+          - "The next task might take a little over 10 minutes."
+
+    - name: Run 'cpcfg' command to copy config from current active to target volume {{ target_install_volume }}
+      uri:
+        url: "https://{{ inventory_hostname }}/mgmt/tm/util/bash"
+        validate_certs: false
+        method: POST
+        body_format: json
+        body: {
+          "command":"run",
+          "utilCmdArgs": "-c 'clsh cpcfg {{ target_install_volume }}'"
+        }
+        timeout: 1200
+        status_code: 200
+        headers:
+          X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+      retries: 2
+      register: result
+
+    - name: Cpcfg command result
+      debug:
+        msg:
+          - "{{ result.json }}"
+
+  rescue:
+    - name: Rolling back
+      debug:
+        msg:
+          - "Rolling back"
+    - name: End upgrade
+      ansible.builtin.meta: end_play
+
+- name: Activate new software volume on standby device
+  when: "ha_post_failover_state != 'active'"
+  block:
+    - name: Activating volume {{ target_install_volume }} with BIGIP-{{ upgrade_software_version }}-{{ upgrade_software_build }}
+      delegate_to: localhost
+      f5networks.f5_modules.bigip_command:
+        provider: "{{ provider }}"
+        commands:
+          - 'reboot volume {{ target_install_volume }}'
+        # wait_for:
+        #   - result[0] contains "rebooted momentarily"
+      register: result
+
+    - name: Target volume {{ target_install_volume }} activation result
+      debug:
+        msg:
+          - "{{ result.stdout }}"
+
+    - name: Reboot notification
+      debug:
+        msg:
+          - It may take take upto 15 minutes or sometimes longer for the device to boot up and for processes to settle.
+          - The next task will wait for timeout period of {{ post_reboot_wait_timeout }} seconds after delay of {{ post_reboot_wait_poll_delay }} seconds.
+
+    - name: Start wait timer for BIG-IP to become ready after reboot
+      delegate_to: localhost
+      f5networks.f5_modules.bigip_wait:
+        provider: "{{ provider }}"
+        timeout: "{{ post_reboot_wait_timeout }}"
+        delay: "{{ post_reboot_wait_poll_delay }}"
+        sleep: 5
+        type: "vcmp"
+      register: result
+
+    - name: Wait timer result
+      debug:
+        msg:
+          - "Elapsed time: {{ result.elapsed }}"
+          # - "Device should now be back up and reachable" if {{result.failed}} == "False" else "Failed"
+
+
+
+
+

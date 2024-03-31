@@ -1,0 +1,15 @@
+---
+# code: language=ansible
+
+- name: Get SLB Virtual Servers count
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_info:
+    provider: "{{ provider }}"
+    #data_increment: 50
+    gather_subset: 
+      - "virtual-servers"
+  register: result
+
+- name: print result
+  debug:
+    msg: "{{result}}"

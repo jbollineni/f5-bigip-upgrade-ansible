@@ -1,0 +1,57 @@
+---
+# code: language=ansible
+
+# Check if atleast one is in active state and processing traffic
+- name: Get devices current failover state
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_info:
+    provider: "{{ provider }}"
+    gather_subset:
+      - "devices"
+  register: result
+
+- name: Set Post Failover failover state fact
+  set_fact:
+    ha_post_failover_state: "{{ item_failover_unit['failover_state'] }}"
+  with_items: "{{ result['devices'] }}"
+  when: "item_failover_unit['name'] == inventory_hostname"
+  loop_control:
+    loop_var: item_failover_unit
+  no_log: true
+
+- name: Print devices HA state
+  debug:
+    msg: "HA Post Failover State: {{ ha_post_failover_state }}"
+
+- name: Set Unit 'a' Post Failover state fact on localhost
+  delegate_to: localhost
+  delegate_facts: true
+  set_fact:
+    localhost_unit_a: "{{ hostvars['localhost']['localhost_unit_a'] | combine({'ha_post_failover_state': item_failover_unit['failover_state']}) }}"
+  with_items: "{{ result['devices'] }}"
+  loop_control:
+    loop_var: item_failover_unit
+  when: "item_failover_unit['name'] == inventory_hostname and unit_a.name == inventory_hostname"
+  no_log: true
+
+- name: Set Unit 'b' Post Failover state fact on localhost
+  delegate_to: localhost
+  delegate_facts: true
+  set_fact:
+    localhost_unit_b: "{{ hostvars['localhost']['localhost_unit_b'] | combine({'ha_post_failover_state': item_failover_unit['failover_state']}) }}"
+  with_items: "{{ result['devices'] }}"
+  loop_control:
+    loop_var: item_failover_unit
+  when: "item_failover_unit['name'] == inventory_hostname and unit_b.name == inventory_hostname"
+  no_log: true
+
+
+- name: Compare Post Failover states of devices
+  fail:
+    msg:
+      - Devices in HA are not in Active / Standby states. Aborting.
+  failed_when: "not ((hostvars['localhost']['localhost_unit_a']['ha_post_failover_state'] == 'standby' and hostvars['localhost']['localhost_unit_b']['ha_post_failover_state'] == 'active') or (hostvars['localhost']['localhost_unit_a']['ha_post_failover_state'] == 'active' and hostvars['localhost']['localhost_unit_b']['ha_post_failover_state'] == 'standby'))"
+  when: "ha_type == 'ha'"
+
+
+# Add vip testing

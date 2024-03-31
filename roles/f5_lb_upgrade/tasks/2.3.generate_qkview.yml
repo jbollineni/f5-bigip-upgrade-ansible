@@ -1,0 +1,23 @@
+---
+# code: language=ansible
+
+- name: Qkview
+  tags: [backups]
+  vars:
+    local_timestamp: "{{ lookup('pipe', 'date -u +%Y%m%d_T%H%M%S_%Z') }}"
+  block:
+    - name: Generate and download qkview
+      delegate_to: localhost
+      f5networks.f5_modules.bigip_qkview:
+        provider: "{{ provider }}"
+        dest: "{{ local_ucs_download_dir }}/{{ inventory_hostname }}_{{ local_timestamp }}.qkview"
+        exclude_core: true
+  rescue:
+    - name: Qkview generation and download failure
+      debug:
+        msg: "Qkview generation failed"
+
+
+# Add step to upload qkview to remote central host
+
+

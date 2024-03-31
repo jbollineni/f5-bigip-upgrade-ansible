@@ -1,0 +1,32 @@
+---
+# code: language=ansible
+
+display_skipped_hosts: false
+
+# Following keys must exist. Leave value empty of unit_b for non-ha devices
+unit_a:
+  name: bigip01a.example.net
+unit_b:
+  name: bigip01b.example.net
+
+upgrade_software_version: 17.1.1.2
+upgrade_software_build: 0.0.10
+target_install_volume: HD1.2 # HD1.1, HD1.2
+
+platform_type: virtual # options: vcmp, appliance, virtual
+ha_type: ha # options: ha, standalone
+
+post_reboot_wait_timeout: 1500 # value in seconds
+post_reboot_wait_poll_delay: 300 # value in seconds
+task_pause_timer: 300 # value in seconds
+
+local_qkview_download_dir: "/var/tmp/"
+local_ucs_download_dir: "/var/tmp/"
+
+# Tweak as necessary to fix restjavad & restnoded timeout issues
+# https://my.f5.com/manage/s/article/K94602685
+rest_api_db_timeout: 300 # value in seconds. Default is 60 secs
+
+sync_failover_group_name: syncfailover_bigip
+ha_group_name: hagroup_bigip
+
