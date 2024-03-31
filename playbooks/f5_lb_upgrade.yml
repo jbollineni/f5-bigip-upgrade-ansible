@@ -1,0 +1,23 @@
+---
+# Playbook Logic
+- name: F5 LB OS Upgrade
+  hosts: all
+  connection: local
+  gather_facts: false
+  # Do not set serial to 1 and ensure the playbook is either run on HA pairs or a single standalone devices
+  # serial: 1
+  order: inventory
+  any_errors_fatal: true
+
+  vars:
+    provider: 
+      user: "{{ f5_admin_user }}" # Set under 'all' group_vars
+      password: "{{ f5_admin_password }}" # Set under 'all' group_vars
+      server: "{{ inventory_hostname }}"
+      no_f5_teem: yes
+      validate_certs: no
+      server_port: 443
+      timeout: 600
+
+  roles:
+    - f5_lb_upgrade
