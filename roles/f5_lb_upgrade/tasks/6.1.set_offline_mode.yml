@@ -1,0 +1,19 @@
+---
+# code: language=ansible
+
+- name: Set Unit to 'Offline' mode prior to activating new software volume {{ target_install_volume }}
+  when: "ha_post_failover_state == 'standby'"
+  uri:
+    url: "https://{{ inventory_hostname }}/mgmt/tm/sys/failover"
+    validate_certs: false
+    method: POST
+    body_format: json
+    body: {
+      "command":"run",
+      "offline":true,
+      "persist": true
+    }
+    headers:
+      X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+
+

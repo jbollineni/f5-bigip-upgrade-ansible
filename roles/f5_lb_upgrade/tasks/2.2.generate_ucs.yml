@@ -1,0 +1,21 @@
+---
+# code: language=ansible
+
+- name: UCS
+  tags: [backups]
+  vars:
+    local_timestamp: "{{ lookup('pipe', 'date -u +%Y%m%d_T%H%M%S_%Z') }}"
+  block:
+    - name: Generate and Download UCS
+      delegate_to: localhost
+      f5networks.f5_modules.bigip_ucs_fetch:
+        provider: "{{ provider }}"
+        src: "{{ inventory_hostname }}_{{ local_timestamp }}.ucs"
+        dest: "{{ local_ucs_download_dir }}/{{ inventory_hostname }}_{{ local_timestamp }}.ucs"
+  rescue:
+    - name: Qkview generation and download failure
+      debug:
+        msg: "UCS generation failed"
+
+
+# Add step to upload ucs to remote central host

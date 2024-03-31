@@ -1,0 +1,31 @@
+---
+# code: language=ansible
+
+# Generate REST API tokens for use in upcoming tasks
+- name: Authenticate and Generate REST API Auth token
+  uri:
+    url: https://{{ inventory_hostname }}/mgmt/shared/authn/login
+    validate_certs: false
+    method: POST
+    body_format: json
+    body:
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      loginProviderName: "tmos"
+  register: login_result
+
+- name: Set Auth token header as fact
+  set_fact:
+    x_f5_auth_token: "{{ login_result.json.token.token }}"
+  no_log: true
+
+- name: Increase Auth token timeout
+  uri:
+    url: "https://{{ inventory_hostname }}/mgmt/shared/authz/tokens/{{ x_f5_auth_token }}"
+    validate_certs: false
+    method: PATCH
+    body_format: json
+    body:
+      timeout: "14400"
+    headers:
+      X-F5-Auth-Token: "{{ x_f5_auth_token }}"

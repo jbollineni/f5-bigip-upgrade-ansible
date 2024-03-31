@@ -1,0 +1,70 @@
+---
+# code: language=ansible
+
+- name: Enable auto sync on sync failover device group
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_group:
+    provider: "{{ provider }}"
+    name: syncfailover_bigip
+    auto_sync: true
+
+- name: Enable HA Group post upgrade
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_ha_group:
+    provider: "{{ provider }}"
+    name: hagroup_bigip
+    enable: true
+
+- name: Save sys config
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_config:
+    provider: "{{ provider }}"
+    save: true
+
+- name: Run final config sync from Active to Standby
+  block:
+    - name: Initiate Confg sync from Active to Standby for sync group - datasync-global-dg
+      uri:
+        url: "https://{{ inventory_hostname }}/mgmt/tm/cm/config-sync"
+        validate_certs: false
+        method: POST
+        body_format: json
+        body: {
+          "command":"run",
+          "options":[
+            {
+              "force-full-load-push to-group":"datasync-global-dg"
+            }
+          ]
+        }
+        headers:
+          X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+      register: result
+      when: "ha_post_upgrade_state == 'active'"
+
+    - name: Initiate Confg sync Active to Standby for sync group - syncfailover_bigip
+      uri:
+        url: "https://{{ inventory_hostname }}/mgmt/tm/cm/config-sync"
+        validate_certs: false
+        method: POST
+        body_format: json
+        body: {
+          "command":"run",
+          "options":[
+            {
+              "force-full-load-push to-group":"syncfailover_bigip"
+            }
+          ]
+        }
+        headers:
+          X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+      register: result
+      when: "ha_post_upgrade_state == 'active'"
+
+  rescue:
+    - name: Config sync task status.
+      debug:
+        msg:
+          - "{{ result }}"
+          - Check if devices are in sync and if not, manually synchronize the Active device to Standby Device.
+

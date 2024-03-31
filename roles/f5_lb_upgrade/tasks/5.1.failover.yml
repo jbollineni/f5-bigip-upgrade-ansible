@@ -1,0 +1,21 @@
+---
+# code: language=ansible
+
+- name: Failover current active unit to upgraded unit
+  when: "ha_original_state == 'active'"
+  uri:
+    url: "https://{{ inventory_hostname }}/mgmt/tm/sys/failover"
+    validate_certs: false
+    method: POST
+    body_format: json
+    body: {
+      "command":"run",
+      "standby":true
+    }
+    headers:
+      X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+
+- name: Pause for 2 minutes for devices in HA pair to stabilize post failover
+  ansible.builtin.pause:
+    minutes: 2
+

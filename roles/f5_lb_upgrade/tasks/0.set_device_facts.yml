@@ -1,0 +1,53 @@
+---
+# code: language=ansible
+
+- name: Get system Serial
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_command:
+    provider: "{{ provider }}"
+    commands:
+      - show /sys hardware | grep "Chassis Serial"
+  register: system_serial
+
+- name: Get system Model
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_command:
+    provider: "{{ provider }}"
+    commands:
+      - show /sys hardware field-fmt |  grep -e marketing | grep -v VPR
+  register: system_model
+
+- name: Get system Version
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_command:
+    provider: "{{ provider }}"
+    commands:
+      - show /sys version | grep  -e Version -e Build
+  register: system_version
+
+- name: Set Device facts
+  set_fact:
+    device_serial: "{{ system_serial.stdout_lines[0] | join(',') | split() | last }}"
+    device_model: "{{ system_model.stdout_lines[0] | join(',') | split('marketing-name ') | last }}"
+    device_os_version: "BIGIP-{{ system_version.stdout_lines[0] | join(',') | split() | join() | split('Sys::Version,Version') | last | replace('Build', '') | replace(',', '-') }}"
+  
+  no_log: true
+
+- name: Print Device Information
+  debug:
+    msg:
+      - "************************ Device Info ******************************"
+      - "Device Name: {{ inventory_hostname }}"
+      - "Device Serial Number: {{ device_serial }}"
+      - "Device Model: {{ device_model }}"
+      - "Device Version: {{ device_os_version }}"
+      - "*******************************************************************"
+
+
+
+
+
+
+
+
+

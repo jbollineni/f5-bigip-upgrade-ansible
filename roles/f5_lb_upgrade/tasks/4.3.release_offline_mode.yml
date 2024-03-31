@@ -1,0 +1,78 @@
+---
+# code: language=ansible
+
+- name: Get Devices current failover state
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_info:
+    provider: "{{ provider }}"
+    gather_subset:
+      - "devices"
+  register: result
+
+- name: Set Post upgrade failover state fact
+  no_log: true
+  set_fact:
+    ha_post_upgrade_state: "{{ item_failover_unit['failover_state'] }}"
+  with_items: "{{ result['devices'] }}"
+  when: "item_failover_unit['name'] == inventory_hostname"
+  loop_control:
+    loop_var: item_failover_unit
+
+- name: Release 'Offline' mode after upgrade
+  uri:
+    url: "https://{{ inventory_hostname }}/mgmt/tm/sys/failover"
+    validate_certs: false
+    method: POST
+    body_format: json
+    body: {
+      "command":"run",
+      "online":true
+    }
+    headers:
+      X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+  register: result
+  when: "ha_post_upgrade_state == 'forced-offline'"
+
+# Takes over 10 minutes for processes to settle when ASM is provisioned.
+# Hence, the delay and retry values of 60 & 20 result in 1200 secs wait.
+- name: Poll and wait for 1st upgraded device after releasing offline
+  uri:
+    url: "https://{{ inventory_hostname }}/mgmt/tm/sys/db/failover.linksup"
+    validate_certs: false
+    method: GET
+    timeout: 300
+    headers:
+      X-F5-Auth-Token: "{{ x_f5_auth_token }}"
+  retries: 60
+  delay: 20
+  register: result
+  until: result.status == 200 and result.json.value == 'true'
+  when: "ha_post_upgrade_state != 'active'"
+
+- name: Pause for 5 minutes for devices in HA pair to stabilize post releasing offline
+  ansible.builtin.pause:
+    minutes: 5
+
+- name: Get Devices current failover state post releasing offline
+  delegate_to: localhost
+  f5networks.f5_modules.bigip_device_info:
+    provider: "{{ provider }}"
+    gather_subset:
+      - "devices"
+  register: result
+
+- name: Set Post upgrade failover state fact after releasing from offline mode
+  no_log: true
+  set_fact:
+    ha_post_upgrade_state: "{{ item_failover_unit['failover_state'] }}"
+  with_items: "{{ result['devices'] }}"
+  when: "item_failover_unit['name'] == inventory_hostname"
+  loop_control:
+    loop_var: item_failover_unit
+
+- name: Print devices HA state
+  debug:
+    msg:
+      - "HA Original State: {{ ha_original_state }}"
+      - "HA Post 1st Upgrade State: {{ ha_post_upgrade_state }}"
+
